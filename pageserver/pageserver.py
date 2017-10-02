@@ -23,6 +23,9 @@ log = logging.getLogger(__name__)
 import socket    # Basic TCP/IP communication on the internet
 import _thread   # Response computation runs concurrently with main program
 
+import inspect
+import os.path   # used for file retrieval
+
 
 def listen(portnum):
     """
@@ -72,6 +75,7 @@ CAT = """
 # See:  https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
 # or    http://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html
 ##
+#STATUS_OK = "HTTP/1.0 200 OK\nContent-Type: text/css\n\n"
 STATUS_OK = "HTTP/1.0 200 OK\n\n"
 STATUS_FORBIDDEN = "HTTP/1.0 403 Forbidden\n\n"
 STATUS_NOT_FOUND = "HTTP/1.0 404 Not Found\n\n"
@@ -90,9 +94,26 @@ def respond(sock):
     log.info("Request was {}\n***\n".format(request))
 
     parts = request.split()
+
     if len(parts) > 1 and parts[0] == "GET":
-        transmit(STATUS_OK, sock)
-        transmit(CAT, sock)
+
+        # took me 3 hours to realize that parts[1] comes pre-formatted with a file separator, 
+        # making os.path.join slice off all but the last arg...... 
+        reqdir = os.path.join(os.getcwd(), config.configuration().DOCROOT) + parts[1] 
+
+        # check for common escapes / invalid file extensions
+        if any (_ in parts[1] for _ in ["//", "~", ".."]) or not parts[1].endswith((".html", ".css")):
+          transmit(STATUS_FORBIDDEN, sock)
+
+        # validate file
+        elif not os.path.isfile(reqdir):
+          transmit(STATUS_NOT_FOUND, sock)
+
+        # if checks passed, serve text files
+        else:
+          with open(reqdir) as rfile_:
+            transmit(STATUS_OK, sock)
+            transmit(rfile_.read(), sock)
     else:
         log.info("Unhandled request: {}".format(request))
         transmit(STATUS_NOT_IMPLEMENTED, sock)
@@ -135,6 +156,7 @@ def get_options():
     return options
 
 
+#DOCROOT = None
 def main():
     options = get_options()
     port = options.PORT
@@ -143,6 +165,7 @@ def main():
     sock = listen(port)
     log.info("Listening on port {}".format(port))
     log.info("Socket is {}".format(sock))
+
     serve(sock, respond)
 
 
